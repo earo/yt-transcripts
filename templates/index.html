@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt transcripts</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --line: #e4e4e1; --ink: #1c1c1a;
+    --muted: #76766f; --accent: #b23b2e; --bad: #b23b2e; --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --panel: #1f1f23; --line: #2e2e34; --ink: #ececea;
+      --muted: #96968f; --accent: #e5705d; --bad: #e5705d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 40px 16px 80px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  textarea {
+    width: 100%; min-height: 130px; padding: 12px 14px; resize: vertical;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  button, select {
+    font: inherit; font-size: 13px; padding: 7px 14px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--ink);
+  }
+  select { padding: 6px 8px; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled, select:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label.chk { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .spacer { flex: 1; }
+  .status { color: var(--muted); font-size: 13px; min-height: 18px; margin-top: 14px; }
+  .err {
+    border-left: 3px solid var(--bad); background: var(--panel);
+    padding: 8px 12px; border-radius: 0 6px 6px 0; margin-top: 8px;
+    font-size: 13px; color: var(--bad);
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 14px 16px; margin-top: 10px;
+  }
+  .card h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .meta {
+    color: var(--muted); font-size: 12px; margin-top: 2px;
+    font-family: ui-monospace, Menlo, monospace;
+    /* error strings carry long unbroken URLs */
+    overflow-wrap: anywhere;
+  }
+  .card.fail h2 { color: var(--bad); }
+  .toolbar { display: flex; gap: 8px; margin-top: 10px; }
+  .toolbar button { padding: 5px 11px; font-size: 12px; }
+  details summary {
+    cursor: pointer; color: var(--muted); font-size: 12px;
+    margin-top: 10px; user-select: none;
+  }
+  details p {
+    white-space: pre-wrap; font-size: 13px; max-height: 240px;
+    overflow: auto; margin: 8px 0 0; color: var(--muted);
+  }
+  .bulk {
+    margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line);
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  /* display:flex would otherwise beat the [hidden] attribute */
+  .bulk[hidden] { display: none; }
+  .bulk .lbl { color: var(--muted); font-size: 12px; margin-right: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>youtube transcript grabber</h1>
+  <p class="sub">playlist links, video links, or bare IDs &mdash; one per line, mix freely.</p>
+
+  <textarea id="input" spellcheck="false"
+    placeholder="https://www.youtube.com/playlist?list=PL...&#10;https://youtu.be/dQw4w9WgXcQ&#10;dQw4w9WgXcQ"></textarea>
+
+  <div class="row">
+    <button class="primary" id="go">get transcripts</button>
+    <label class="chk"><input type="checkbox" id="asjson"> keep timestamps (JSON)</label>
+    <span class="spacer"></span>
+    <button id="clear">clear</button>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div id="errors"></div>
+  <div id="results"></div>
+
+  <div class="bulk" id="bulk" hidden>
+    <span class="lbl">format</span>
+    <select id="format" title="file format for downloads">
+      <option value="txt">.txt</option>
+      <option value="md">.md</option>
+    </select>
+    <button id="copyall">copy all</button>
+    <button id="dlone">one combined file</button>
+    <button id="dlmany">separate files</button>
+    <button id="zipall">.zip</button>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let rows = [];
+
+const esc = (s) => {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+};
+
+const shortErr = (e) => {
+  const one = String(e).replace(/\s+/g, " ").trim();
+  return one.length > 150 ? one.slice(0, 150) + " ..." : one;
+};
+
+// JSON mode wins: those payloads are only valid as .json
+const fmt = () => ($("asjson").checked ? "json" : $("format").value);
+const good = () => rows.filter((r) => r.ok);
+const nameFor = (r) => r.stem + "." + fmt();
+
+function flash(btn, msg) {
+  const old = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => { btn.textContent = old; }, 1100);
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    flash(btn, "copied");
+  } catch {
+    flash(btn, "copy failed");
+  }
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// one transcript, on its own
+function solo(r) {
+  const f = fmt();
+  if (f === "md") {
+    return "# " + r.title + "\n\nhttps://youtu.be/" + r.id + "\n\n" + r.text + "\n";
+  }
+  return r.text;
+}
+
+// every transcript in one file, delimited by title
+function combined() {
+  const list = good();
+  const f = fmt();
+
+  if (f === "json") {
+    return JSON.stringify(
+      list.map((r) => ({ title: r.title, id: r.id, transcript: JSON.parse(r.text) })),
+      null, 2
+    );
+  }
+  if (f === "md") {
+    return "# Transcripts\n\n" + list
+      .map((r) => "## " + r.title + "\n\nhttps://youtu.be/" + r.id + "\n\n" + r.text)
+      .join("\n\n---\n\n") + "\n";
+  }
+  return list
+    .map((r) => "===== " + r.title + " (" + r.id + ") =====\n" + r.text)
+    .join("\n\n");
+}
+
+const MIME = { txt: "text/plain", md: "text/markdown", json: "application/json" };
+
+function render() {
+  const box = $("results");
+  box.innerHTML = "";
+
+  rows.forEach((r) => {
+    const card = document.createElement("div");
+    card.className = "card" + (r.ok ? "" : " fail");
+    const size = r.ok ? r.text.length.toLocaleString() + " chars" : shortErr(r.error);
+    // full error on hover, so the card stays scannable
+    const tip = r.ok ? "" : ' title="' + esc(r.error) + '"';
+    card.innerHTML =
+      "<h2>" + esc(r.title) + "</h2>" +
+      '<div class="meta"' + tip + ">" + esc(r.id) + " &middot; " + esc(size) + "</div>";
+
+    if (r.ok) {
+      const bar = document.createElement("div");
+      bar.className = "toolbar";
+
+      const cp = document.createElement("button");
+      cp.textContent = "copy";
+      cp.onclick = () => copyText(solo(r), cp);
+
+      const dl = document.createElement("button");
+      dl.textContent = "download";
+      dl.onclick = () =>
+        saveBlob(new Blob([solo(r)], { type: MIME[fmt()] }), nameFor(r));
+
+      bar.append(cp, dl);
+      card.append(bar);
+
+      const det = document.createElement("details");
+      det.innerHTML = "<summary>preview</summary><p>" + esc(r.text.slice(0, 1200)) +
+        (r.text.length > 1200 ? " ..." : "") + "</p>";
+      card.append(det);
+    }
+    box.append(card);
+  });
+
+  const any = good().length > 0;
+  $("bulk").hidden = !any;
+  $("format").disabled = $("asjson").checked;
+}
+
+async function run() {
+  const raw = $("input").value.trim();
+  if (!raw) return;
+
+  $("go").disabled = true;
+  $("status").textContent = "expanding links and pulling transcripts...";
+  $("errors").innerHTML = "";
+  rows = [];
+  render();
+
+  try {
+    const res = await fetch("/api/transcripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: raw, json: $("asjson").checked }),
+    });
+    const data = await res.json();
+    rows = data.results || [];
+    (data.errors || []).forEach((e) => {
+      const d = document.createElement("div");
+      d.className = "err";
+      d.textContent = e;
+      $("errors").append(d);
+    });
+    $("status").textContent = good().length + " of " + rows.length + " transcript(s) fetched";
+  } catch (e) {
+    $("status").textContent = "request failed: " + e.message;
+  } finally {
+    $("go").disabled = false;
+    render();
+  }
+}
+
+$("go").onclick = run;
+$("clear").onclick = () => {
+  $("input").value = "";
+  rows = [];
+  $("status").textContent = "";
+  $("errors").innerHTML = "";
+  render();
+};
+$("input").onkeydown = (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
+};
+$("format").onchange = render;
+
+$("copyall").onclick = (e) => copyText(combined(), e.target);
+
+$("dlone").onclick = () => {
+  const stamp = new Date().toISOString().slice(0, 10);
+  saveBlob(new Blob([combined()], { type: MIME[fmt()] }),
+           "transcripts_" + stamp + "." + fmt());
+};
+
+// browsers throttle rapid downloads, so stagger them
+$("dlmany").onclick = async (e) => {
+  const btn = e.target;
+  const list = good();
+  btn.disabled = true;
+  for (const r of list) {
+    saveBlob(new Blob([solo(r)], { type: MIME[fmt()] }), nameFor(r));
+    await new Promise((ok) => setTimeout(ok, 180));
+  }
+  btn.disabled = false;
+  flash(btn, list.length + " saved");
+};
+
+$("zipall").onclick = async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  try {
+    const payload = good().map((r) => ({ filename: nameFor(r), text: solo(r) }));
+    const res = await fetch("/api/zip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ results: payload }),
+    });
+    if (!res.ok) throw new Error("zip failed");
+    saveBlob(await res.blob(), "transcripts.zip");
+  } catch (err) {
+    flash(btn, "failed");
+  } finally {
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>

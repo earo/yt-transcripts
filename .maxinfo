@@ -1,0 +1,14 @@
+youtube playlist transcript generator. cli + tiny flask webapp.
+
+yt_transcripts.py - point it at a playlist/channel/video url (or bare video ids)
+and it yt-dlp's out the video list, then pulls transcripts in parallel into
+transcripts/. --json keeps timestamps, plain text otherwise.
+
+app.py - same engine behind a one-page webapp (python app.py -> :5001). paste any
+mix of playlist links, video links and bare ids; copy or download the results as
+txt/md, either n separate files, one combined file delimited by video title, or a
+zip. imports expand()/safe() from the cli so there's one code path.
+
+needs: pip install flask youtube-transcript-api yt-dlp
+
+note: youtube ip-blocks you if you pull too much too fast. it clears on its own.

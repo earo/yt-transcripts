@@ -1,0 +1,13 @@
+# generated output
+transcripts/
+raw/
+*.zip
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macos
+.DS_Store
