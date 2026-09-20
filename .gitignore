@@ -9,5 +9,8 @@ __pycache__/
 .venv/
 venv/
 
+# editor
+.vscode/
+
 # macos
 .DS_Store
