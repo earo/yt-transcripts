@@ -79,3 +79,24 @@ yt_transcripts.py    CLI — link expansion, parallel fetch, file writing
 app.py               Flask routes; imports expand()/safe() from the CLI
 templates/index.html the entire frontend, no build step, no dependencies
 ```
+
+## Password protection & deployment
+
+The webapp asks for a username and password (HTTP Basic Auth) whenever
+`APP_PASSWORD` is set:
+
+| env var | what it does |
+| --- | --- |
+| `APP_PASSWORD` | the password; if unset, locally the app stays open |
+| `APP_USER` | the username (default `admin`) |
+| `REQUIRE_AUTH` | `1` = refuse to serve at all without `APP_PASSWORD` (the Docker image sets this) |
+
+A `Dockerfile` is included (gunicorn on port 5001). To run it in Docker:
+
+```bash
+docker build -t yt-transcripts .
+docker run -p 5001:5001 -e APP_PASSWORD='something-long' yt-transcripts
+```
+
+On Coolify: pick the **Dockerfile** build pack, set the port to `5001`, and add
+`APP_PASSWORD` (and optionally `APP_USER`) as environment variables.

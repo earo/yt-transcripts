@@ -12,17 +12,52 @@ Requires:
     pip install flask youtube-transcript-api yt-dlp
 """
 
+import hmac
 import io
+import os
 import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from yt_transcripts import LANGS, expand, safe
 
 app = Flask(__name__)
+
+# --- access control -------------------------------------------------------
+# Set APP_PASSWORD (and optionally APP_USER, default "admin") to require a
+# login. With REQUIRE_AUTH=1 (set in the Dockerfile) the app refuses to serve
+# anything until a password is configured, so a deployment can't go live open.
+APP_USER = os.environ.get("APP_USER", "admin")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "") == "1"
+
+
+@app.before_request
+def check_auth():
+    if request.path == "/healthz":
+        return None  # container health check, no secrets behind it
+    if not APP_PASSWORD:
+        if REQUIRE_AUTH:
+            return Response("APP_PASSWORD is not set - refusing to serve.\n",
+                            status=503, mimetype="text/plain")
+        return None  # local dev: no password configured, stay open
+
+    auth = request.authorization
+    ok = (auth is not None
+          and hmac.compare_digest((auth.username or "").encode(), APP_USER.encode())
+          and hmac.compare_digest((auth.password or "").encode(), APP_PASSWORD.encode()))
+    if not ok:
+        return Response("Login required.\n", status=401, mimetype="text/plain",
+                        headers={"WWW-Authenticate": 'Basic realm="yt-transcripts"'})
+    return None
+
+
+@app.get("/healthz")
+def healthz():
+    return "ok"
 
 BARE_ID = re.compile(r"[\w-]{11}")
 MAX_WORKERS = 5

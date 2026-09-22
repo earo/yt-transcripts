@@ -1,0 +1,10 @@
+.git
+.vscode
+__pycache__
+*.pyc
+.venv
+venv
+transcripts
+raw
+*.zip
+.DS_Store
